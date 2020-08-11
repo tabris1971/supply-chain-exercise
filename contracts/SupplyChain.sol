@@ -1,142 +1,152 @@
+/*
+    This exercise has been updated to use Solidity version 0.5
+    Breaking changes from 0.4 to 0.5 can be found here: 
+    https://solidity.readthedocs.io/en/v0.5.0/050-breaking-changes.html
+*/
+
 pragma solidity ^0.5.0;
 
-    /*
-        The EventTickets contract keeps track of the details and ticket sales of one event.
-     */
+contract SupplyChain {
 
-contract EventTickets {
+  /* set owner */
+  address owner;
 
-    /*
-        Create a public state variable called owner.
-        Use the appropriate keyword to create an associated getter function.
-        Use the appropriate keyword to allow ether transfers.
-     */
-    address payable owner;
-    uint   TICKET_PRICE = 100 wei;
+  /* Add a variable called skuCount to track the most recent sku # */
+  uint skuCount;
+  /* Add a line that creates a public mapping that maps the SKU (a number) to an Item.
+     Call this mappings items
+  */
+  mapping (uint => Item) public items;
 
-    /*
-        Create a struct called "Event".
-        The struct has 6 fields: description, website (URL), totalTickets, sales, buyers, and isOpen.
-        Choose the appropriate variable type for each field.
-        The "buyers" field should keep track of addresses and how many tickets each buyer purchases.
-    */
-    struct Event {
-        string description;
-        string URL;
-        uint totalTickets;
-        uint sales;
-        mapping (address => uint) buyers;
-        bool isOpen;
-    }
-    Event myEvent;
+  /* Add a line that creates an enum called State. This should have 4 states
+    ForSale
+    Sold
+    Shipped
+    Received
+    (declaring them in this order is important for testing)
+  */
+  enum State {
+    ForSale,
+    Sold,
+    Shipped,
+    Received
+  }
+  /* Create a struct named Item.
+    Here, add a name, sku, price, state, seller, and buyer
+    We've left you to figure out what the appropriate types are,
+    if you need help you can ask around :)
+    Be sure to add "payable" to addresses that will be handling value transfer
+  */
+  struct Item {
+    string name;
+    uint sku;
+    uint price;
+    State state;
+    address payable seller;
+    address payable buyer;
+  }
+  /* Create 4 events with the same name as each possible State (see above)
+    Prefix each event with "Log" for clarity, so the forSale event will be called "LogForSale"
+    Each event should accept one argument, the sku */
+  event LogForSale(uint indexed sku);
+  event LogSold(uint indexed sku);
+  event LogShipped(uint indexed sku);
+  event LogReceived(uint indexed sku);
+    
+/* Create a modifer that checks if the msg.sender is the owner of the contract */
 
-    /*
-        Define 3 logging events.
-        LogBuyTickets should provide information about the purchaser and the number of tickets purchased.
-        LogGetRefund should provide information about the refund requester and the number of tickets refunded.
-        LogEndSale should provide infromation about the contract owner and the balance transferred to them.
-    */
-    event LogBuyTickets(address indexed buyer, uint numTickets);
-    event LogGetRefund(address indexed refunded, uint numTickets);
-    event LogEndSale(address indexed owner, uint balance);
-    /*
-        Create a modifier that throws an error if the msg.sender is not the owner.
-    */
-    modifier verifyOwner  {require (owner == msg.sender); _;}
-    /*
-        Define a constructor.
-        The constructor takes 3 arguments, the description, the URL and the number of tickets for sale.
-        Set the owner to the creator of the contract.
-        Set the appropriate myEvent details.
-    */
-        constructor (string memory _description, string memory _URL, uint _totalTickets ) public {
-            owner = msg.sender;
-            myEvent.description = _description;
-            myEvent.URL = _URL;
-            myEvent.totalTickets = _totalTickets;
-            myEvent.isOpen = true;
-        }
-    /*
-        Define a function called readEvent() that returns the event details.
-        This function does not modify state, add the appropriate keyword.
-        The returned details should be called description, website, uint totalTickets, uint sales, bool isOpen in that order.
-    */
-    function readEvent()
-        public
-        view
-        returns(string memory description, string memory website, uint totalTickets, uint sales, bool isOpen)
+  modifier verifyCaller (address _address) { require (msg.sender == _address); _;}
+  modifier verifyOwner (address _address) { require (owner == _address);_;}
+  modifier paidEnough(uint _price) { require(msg.value >= _price); _;}
+  modifier checkValue(uint _sku) {
+    //refund them after pay for item (why it is before, _ checks for logic before func)
+    _;
+    uint _price = items[_sku].price;
+    uint amountToRefund = msg.value - _price;
+    items[_sku].buyer.transfer(amountToRefund);
+  }
+
+  /* For each of the following modifiers, use what you learned about modifiers
+   to give them functionality. For example, the forSale modifier should require
+   that the item with the given sku has the state ForSale. 
+   Note that the uninitialized Item.State is 0, which is also the index of the ForSale value,
+   so checking that Item.State == ForSale is not sufficient to check that an Item is for sale.
+   Hint: What item properties will be non-zero when an Item has been added?
+   */
+  modifier forSale(uint _sku) {
+      require (items[_sku].state == State.ForSale);
+      require (items[_sku].state != State.Sold);
+      _;}
+  modifier sold (uint _sku) {require (items[_sku].state == State.Sold);_;}
+  modifier  shipped (uint _sku) {require (items[_sku].state == State.Shipped);_;}
+  modifier received (uint _sku) {require (items[_sku].state == State.Received); _;}
+  
+  constructor() public {
+    /* Here, set the owner as the person who instantiated the contract
+       and set your skuCount to 0. */
+       owner = msg.sender;
+       skuCount = 0;
+  }
+
+  function addItem(string memory _name, uint _price) public returns(bool){
+    emit LogForSale(skuCount);
+    items[skuCount] = Item({name: _name, sku: skuCount, price: _price, state: State.ForSale, seller: msg.sender, buyer: address(0)});
+    skuCount = skuCount + 1;
+    return true;
+  }
+
+  /* Add a keyword so the function can be paid. This function should transfer money
+    to the seller, set the buyer as the person who called this transaction, and set the state
+    to Sold. Be careful, this function should use 3 modifiers to check if the item is for sale,
+    if the buyer paid enough, and check the value after the function is called to make sure the buyer is
+    refunded any excess ether sent. Remember to call the event associated with this function!*/
+
+  function buyItem(uint sku)
+    public
+    payable
+    forSale(sku)
+    paidEnough(items[sku].price)
+    checkValue(sku)
+    
     {
-        return (myEvent.description, myEvent.URL, myEvent.totalTickets, myEvent.sales, myEvent.isOpen);
-    }
+     
+     items[sku].seller.transfer(items[sku].price);
+     items[sku].buyer = msg.sender;
+     items[sku].state = State.Sold;
+     emit LogSold(sku);
+  }
 
-    /*
-        Define a function called getBuyerTicketCount().
-        This function takes 1 argument, an address and
-        returns the number of tickets that address has purchased.
-    */
-    function getBuyerTicketCount(address buyer) public returns(uint) {
-        return myEvent.buyers[buyer];
-    }
-    /*
-        Define a function called buyTickets().
-        This function allows someone to purchase tickets for the event.
-        This function takes one argument, the number of tickets to be purchased.
-        This function can accept Ether.
-        Be sure to check:
-            - That the event isOpen
-            - That the transaction value is sufficient for the number of tickets purchased
-            - That there are enough tickets in stock
-        Then:
-            - add the appropriate number of tickets to the purchasers count
-            - account for the purchase in the remaining number of available tickets
-            - refund any surplus value sent with the transaction
-            - emit the appropriate event
-    */
-    function buyTickets(uint numTickets) public payable {
-        require (myEvent.isOpen == true);
-        require (msg.value >= numTickets * TICKET_PRICE);
-        require (numTickets <= myEvent.totalTickets);
-        
-        myEvent.buyers[msg.sender] += numTickets;
-        myEvent.totalTickets -= numTickets;
-        uint price = numTickets * TICKET_PRICE;
-        uint refund = msg.value - price;
-        myEvent.sales += price;
-        msg.sender.transfer(refund);
-        emit LogBuyTickets(msg.sender, numTickets);
-    }
+  /* Add 2 modifiers to check if the item is sold already, and that the person calling this function
+  is the seller. Change the state of the item to shipped. Remember to call the event associated with this function!*/
+  function shipItem(uint sku)
+    public
+    sold(sku)
+    verifyCaller(items[sku].seller)
+  {
+      items[sku].state = State.Shipped;
+      emit LogShipped(sku);
+  }
 
-    /*
-        Define a function called getRefund().
-        This function allows someone to get a refund for tickets for the account they purchased from.
-        TODO:
-            - Check that the requester has purchased tickets.
-            - Make sure the refunded tickets go back into the pool of avialable tickets.
-            - Transfer the appropriate amount to the refund requester.
-            - Emit the appropriate event.
-    */
-        function getRefund () public payable {
-            require (myEvent.buyers[msg.sender] >0);
-            uint numTickets = myEvent.buyers[msg.sender];
-            uint refund = numTickets * TICKET_PRICE;
-            myEvent.buyers[msg.sender] -= numTickets;
-            myEvent.totalTickets += numTickets;
-            myEvent.sales -= refund;
-            msg.sender.transfer(refund);
-            emit LogGetRefund(msg.sender, numTickets);
-        } 
-    /*
-        Define a function called endSale().
-        This function will close the ticket sales.
-        This function can only be called by the contract owner.
-        TODO:
-            - close the event
-            - transfer the contract balance to the owner
-            - emit the appropriate event
-    */
-        function endSale() public payable verifyOwner {
-            myEvent.isOpen = false;
-            owner.transfer(myEvent.sales);
-            emit LogEndSale(owner,myEvent.sales);
-        }
+  /* Add 2 modifiers to check if the item is shipped already, and that the person calling this function
+  is the buyer. Change the state of the item to received. Remember to call the event associated with this function!*/
+  function receiveItem(uint sku)
+    public
+    shipped(sku)
+    verifyCaller(items[sku].buyer)
+  {
+    items[sku].state = State.Received;
+    emit LogReceived(sku);
+  }
+
+  /* We have these functions completed so we can run tests, just ignore it :) */
+  function fetchItem(uint _sku) public view returns (string memory name, uint sku, uint price, uint state, address seller, address buyer) {
+    name = items[_sku].name;
+    sku = items[_sku].sku;
+    price = items[_sku].price;
+    state = uint(items[_sku].state);
+    seller = items[_sku].seller;
+    buyer = items[_sku].buyer;
+    return (name, sku, price, state, seller, buyer);
+  }
+
 }
